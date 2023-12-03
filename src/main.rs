@@ -85,12 +85,11 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
 /// Subscribe to twich streamer's live notifications
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(slash_command, prefix_command, ephemeral)]
 async fn subscribe(
     ctx: Context<'_>,
     #[description = "Twitch Streamer"] streamer: String,
 ) -> Result<(), Error> {
-    let dm = ctx.author().create_dm_channel(ctx).await?;
     let Some(streamer) = ctx
         .data()
         .twitch_client
@@ -98,7 +97,7 @@ async fn subscribe(
         .get_channel_from_login(&streamer, &ctx.data().twitch_token)
         .await?
     else {
-        dm.say(ctx, format!("404: No such streamer: `{streamer}`"))
+        ctx.say(format!("404: No such streamer: `{streamer}`"))
             .await?;
         return Ok(());
     };
@@ -127,19 +126,18 @@ async fn subscribe(
         .new_subscriptions
         .unbounded_send(streamer.broadcaster_id)?;
 
-    dm.say(ctx, response).await?;
+    ctx.say(response).await?;
     Ok(())
 }
 
 /// List current subscriptions
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(slash_command, prefix_command, ephemeral)]
 async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
-    let dm = ctx.author().create_dm_channel(ctx).await?;
     let Some(subscriptions) = UserData::get_async(&ctx.author().id.0, &ctx.data().db)
         .await?
         .map(|data| data.contents.subscriptions)
     else {
-        dm.say(ctx, "Currently not subscribed anyone.").await?;
+        ctx.say("Currently not subscribed anyone.").await?;
         return Ok(());
     };
 
@@ -160,7 +158,7 @@ async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
             .join(", ")
     );
 
-    dm.say(ctx, response).await?;
+    ctx.say(response).await?;
     Ok(())
 }
 

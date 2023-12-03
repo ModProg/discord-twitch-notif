@@ -155,7 +155,7 @@ async fn autocomplete_unsubscribe<'a>(
     subscriptions
         .into_iter()
         .map(|c| c.broadcaster_name.to_string())
-        .filter(move |c| c.starts_with(partial))
+        .filter(move |c| c.to_lowercase().starts_with(&partial.to_lowercase()))
 }
 
 /// Unsubscribe from twitch streamer's live notifications
@@ -209,8 +209,9 @@ async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     let Some(subscriptions) = UserData::get_async(&ctx.author().id.0, &ctx.data().db)
         .await?
         .map(|data| data.contents.subscriptions)
+        .filter(|subs| !subs.is_empty())
     else {
-        ctx.say("Currently not subscribed anyone.").await?;
+        ctx.say("Currently not subscribed to anyone.").await?;
         return Ok(());
     };
 

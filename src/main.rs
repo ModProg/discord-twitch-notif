@@ -1,5 +1,5 @@
 #![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::module_name_repetitions, clippy::too_many_lines)]
 
 use std::collections::HashSet;
 use std::convert::AsRef;
@@ -90,6 +90,7 @@ async fn subscribe(
     ctx: Context<'_>,
     #[description = "Twitch Streamer"] streamer: String,
 ) -> Result<(), Error> {
+    let dm = ctx.author().create_dm_channel(ctx).await?;
     let Some(streamer) = ctx
         .data()
         .twitch_client
@@ -97,7 +98,7 @@ async fn subscribe(
         .get_channel_from_login(&streamer, &ctx.data().twitch_token)
         .await?
     else {
-        ctx.say(format!("404: No such streamer: `{streamer}`"))
+        dm.say(ctx, format!("404: No such streamer: `{streamer}`"))
             .await?;
         return Ok(());
     };
@@ -126,18 +127,19 @@ async fn subscribe(
         .new_subscriptions
         .unbounded_send(streamer.broadcaster_id)?;
 
-    ctx.say(response).await?;
+    dm.say(ctx, response).await?;
     Ok(())
 }
 
 /// List current subscriptions
 #[poise::command(slash_command, prefix_command)]
 async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
+    let dm = ctx.author().create_dm_channel(ctx).await?;
     let Some(subscriptions) = UserData::get_async(&ctx.author().id.0, &ctx.data().db)
         .await?
         .map(|data| data.contents.subscriptions)
     else {
-        ctx.say("Currently not subscribed anyone.").await?;
+        dm.say(ctx, "Currently not subscribed anyone.").await?;
         return Ok(());
     };
 
@@ -158,7 +160,7 @@ async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
             .join(", ")
     );
 
-    ctx.say(response).await?;
+    dm.say(ctx, response).await?;
     Ok(())
 }
 

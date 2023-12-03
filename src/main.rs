@@ -20,6 +20,7 @@ use futures::{Future, StreamExt};
 use poise::serenity_prelude::{self as serenity, UserId as DiscordUserId};
 use serde::{Deserialize, Serialize};
 use tokio::select;
+use tracing::error;
 use twitch_api::eventsub::stream::StreamOnlineV1Payload;
 use twitch_api::twitch_oauth2::AppAccessToken;
 use twitch_api::types::{UserId as TwitchUserId, UserIdRef, VideoType};
@@ -84,7 +85,7 @@ struct Data {
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-/// Subscribe to twich streamer's live notifications
+/// Subscribe to twitch streamer's live notifications
 #[poise::command(slash_command, prefix_command, ephemeral)]
 async fn subscribe(
     ctx: Context<'_>,
@@ -125,6 +126,78 @@ async fn subscribe(
     ctx.data()
         .new_subscriptions
         .unbounded_send(streamer.broadcaster_id)?;
+
+    ctx.say(response).await?;
+    Ok(())
+}
+
+async fn autocomplete_unsubscribe<'a>(
+    ctx: Context<'_>,
+    partial: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    let subscriptions = UserData::get_async(&ctx.author().id.0, &ctx.data().db)
+        .await
+        .map_err(|e| error!("{e:#}"))
+        .unwrap_or_default()
+        .map(|data| data.contents.subscriptions)
+        .unwrap_or_default();
+
+    let subscriptions: Vec<&UserIdRef> = subscriptions.iter().map(AsRef::as_ref).collect();
+    let subscriptions = ctx
+        .data()
+        .twitch_client
+        .helix
+        .get_channels_from_ids(&subscriptions, &ctx.data().twitch_token)
+        .await
+        .map_err(|e| error!("{e:#}"))
+        .unwrap_or_default();
+
+    subscriptions
+        .into_iter()
+        .map(|c| c.broadcaster_name.to_string())
+        .filter(move |c| c.starts_with(partial))
+}
+
+/// Unsubscribe from twitch streamer's live notifications
+#[poise::command(slash_command, prefix_command, ephemeral)]
+async fn unsubscribe(
+    ctx: Context<'_>,
+    #[description = "Twitch Streamer"]
+    #[autocomplete = "autocomplete_unsubscribe"]
+    streamer: String,
+) -> Result<(), Error> {
+    let Some(streamer) = ctx
+        .data()
+        .twitch_client
+        .helix
+        .get_channel_from_login(&streamer, &ctx.data().twitch_token)
+        .await?
+    else {
+        ctx.say(format!("404: No such streamer: `{streamer}`"))
+            .await?;
+        return Ok(());
+    };
+
+    let response = format!("Unsubscribed from {}", streamer.broadcaster_name);
+
+    let _ = UserData {
+        key: ctx.author().id.0,
+        subscriptions: HashSet::default(),
+    }
+    .push_into_async(&ctx.data().db)
+    .await;
+    let mut data = UserData::get_async(&ctx.author().id.0, &ctx.data().db)
+        .await?
+        .expect("I shouldn't delete those I think");
+
+    {
+        let broadcaster_id = streamer.broadcaster_id.clone();
+        data.modify_async(&ctx.data().db, move |data| {
+            // TODO @ecton let me return values here
+            data.contents.subscriptions.remove(&broadcaster_id);
+        })
+        .await?;
+    }
 
     ctx.say(response).await?;
     Ok(())
@@ -225,7 +298,7 @@ async fn main() -> Result<(), Error> {
         let twitch_client = twitch_client.clone();
         poise::Framework::builder()
             .options(poise::FrameworkOptions {
-                commands: vec![subscribe(), subscriptions()],
+                commands: vec![subscribe(), subscriptions(), unsubscribe()],
                 ..Default::default()
             })
             .token(env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
